@@ -219,22 +219,28 @@
             <h2 id="chartTitle" class="chart-title">Signal</h2>
             <p id="chartSubtitle" class="chart-subtitle">Noch keine Daten geladen.</p>
           </div>
-          <div class="legend" role="group" aria-label="Serien ein- oder ausblenden">
-            <label class="legend-item">
-              <input id="showOriginal" type="checkbox" checked>
-              <span class="swatch swatch-original" aria-hidden="true"></span>
-              <span>Original</span>
-            </label>
-            <label class="legend-item">
-              <input id="showSmoothed" type="checkbox" checked>
-              <span class="swatch swatch-smoothed" aria-hidden="true"></span>
-              <span>Geglättet</span>
-            </label>
-            <label class="legend-item">
-              <input id="showResidual" type="checkbox" checked>
-              <span class="swatch swatch-residual" aria-hidden="true"></span>
-              <span>Rest</span>
-            </label>
+          <div class="chart-actions">
+            <div class="legend" role="group" aria-label="Serien ein- oder ausblenden">
+              <label class="legend-item">
+                <input id="showOriginal" type="checkbox" checked>
+                <span class="swatch swatch-original" aria-hidden="true"></span>
+                <span>Original</span>
+              </label>
+              <label class="legend-item">
+                <input id="showSmoothed" type="checkbox" checked>
+                <span class="swatch swatch-smoothed" aria-hidden="true"></span>
+                <span>Geglättet</span>
+              </label>
+              <label class="legend-item">
+                <input id="showResidual" type="checkbox" checked>
+                <span class="swatch swatch-residual" aria-hidden="true"></span>
+                <span>Rest</span>
+              </label>
+            </div>
+            <button id="exportPng" class="btn btn-secondary chart-export" type="button"
+                    aria-haspopup="dialog" aria-controls="exportDialog" disabled>
+              PNG exportieren
+            </button>
           </div>
         </div>
 
@@ -307,6 +313,48 @@
       </section>
     </section>
   </main>
+
+  <dialog id="exportDialog" class="export-dialog" aria-labelledby="exportTitle">
+    <div class="export-head">
+      <div>
+        <h2 id="exportTitle" class="export-title">PNG exportieren</h2>
+        <p class="export-subtitle">Serien für das Bild auswählen.</p>
+      </div>
+      <button id="exportClose" class="browser-close" type="button"
+              aria-label="Export schließen">×</button>
+    </div>
+
+    <fieldset class="export-series">
+      <legend>Serien</legend>
+      <label class="export-check">
+        <input id="exportOriginal" type="checkbox" checked>
+        <span class="swatch swatch-original" aria-hidden="true"></span>
+        <span>Original</span>
+      </label>
+      <label class="export-check">
+        <input id="exportSmoothed" type="checkbox" checked>
+        <span class="swatch swatch-smoothed" aria-hidden="true"></span>
+        <span>Geglättet</span>
+      </label>
+      <label class="export-check">
+        <input id="exportResidual" type="checkbox" checked>
+        <span class="swatch swatch-residual" aria-hidden="true"></span>
+        <span>Rest (optional)</span>
+      </label>
+    </fieldset>
+
+    <label class="export-check export-option">
+      <input id="exportHighRes" type="checkbox" checked>
+      <span>Hohe Auflösung (2×)</span>
+    </label>
+
+    <p id="exportHint" class="export-hint" role="status" aria-live="polite"></p>
+
+    <div class="export-actions">
+      <button id="exportCancel" class="btn btn-secondary" type="button">Abbrechen</button>
+      <button id="exportConfirm" class="btn btn-primary" type="button">PNG speichern</button>
+    </div>
+  </dialog>
 
   <dialog id="browserDialog" class="browser-dialog" aria-labelledby="browserTitle">
     <div class="browser-head">

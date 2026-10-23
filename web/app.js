@@ -426,17 +426,26 @@ function createChart(canvas, tooltip) {
     const right = compact ? 10 : 18;
     const top = compact ? 24 : 28;
     const bottom = compact ? 40 : 46;
-    const gap = compact ? 26 : 32;
+    const showResidual = state.visible.residual;
+    const gap = showResidual ? (compact ? 26 : 32) : 0;
     const plotWidth = Math.max(10, width - left - right);
     const plotHeight = Math.max(20, height - top - bottom - gap);
-    const topHeight = plotHeight * 0.63;
-    const topRect = { x: left, y: top, w: plotWidth, h: topHeight };
-    const bottomRect = {
-      x: left,
-      y: top + topHeight + gap,
-      w: plotWidth,
-      h: plotHeight - topHeight,
-    };
+
+    let topRect;
+    let bottomRect = null;
+    if (showResidual) {
+      const topHeight = plotHeight * 0.63;
+      topRect = { x: left, y: top, w: plotWidth, h: topHeight };
+      bottomRect = {
+        x: left,
+        y: top + topHeight + gap,
+        w: plotWidth,
+        h: plotHeight - topHeight,
+      };
+    } else {
+      topRect = { x: left, y: top, w: plotWidth, h: plotHeight };
+    }
+
     return {
       width,
       height,
@@ -450,6 +459,12 @@ function createChart(canvas, tooltip) {
       topRect,
       bottomRect,
     };
+  }
+
+  // Unterkante des Diagrammbereichs. Ohne Rest-Panel endet er am Signal-Panel.
+  function layoutBottom(layout) {
+    const rect = layout.bottomRect || layout.topRect;
+    return rect.y + rect.h;
   }
 
   function xToPixel(value) {
@@ -653,7 +668,7 @@ function createChart(canvas, tooltip) {
           scales.signal
         );
       }
-      if (state.visible.residual) {
+      if (state.visible.residual && layout.bottomRect) {
         cache.residual = buildPoints(
           data.residual,
           scales.i0,
@@ -763,25 +778,29 @@ function createChart(canvas, tooltip) {
       scales.signal[1],
       layout.compact ? 4 : 5
     );
-    const yTicksBottom = niceTicks(
-      scales.residual[0],
-      scales.residual[1],
-      layout.compact ? 3 : 4
-    );
+    const yTicksBottom = layout.bottomRect
+      ? niceTicks(
+          scales.residual[0],
+          scales.residual[1],
+          layout.compact ? 3 : 4
+        )
+      : [];
 
-    // Vertikale Gitterlinien über beide Panels
+    // Vertikale Gitterlinien über alle Panels
     context.beginPath();
     for (const tick of xTicks) {
       const x = xToPixel(tick);
       context.moveTo(x, layout.topRect.y);
-      context.lineTo(x, layout.bottomRect.y + layout.bottomRect.h);
+      context.lineTo(x, layoutBottom(layout));
     }
     context.strokeStyle = CHART_COLORS.grid;
     context.lineWidth = 1;
     context.stroke();
 
     drawHorizontalGrid(layout.topRect, yTicksTop, scales.signal);
-    drawHorizontalGrid(layout.bottomRect, yTicksBottom, scales.residual);
+    if (layout.bottomRect) {
+      drawHorizontalGrid(layout.bottomRect, yTicksBottom, scales.residual);
+    }
 
     // Rahmen und Panelüberschriften
     context.strokeStyle = CHART_COLORS.border;
@@ -792,12 +811,14 @@ function createChart(canvas, tooltip) {
       layout.topRect.w,
       layout.topRect.h
     );
-    context.strokeRect(
-      layout.bottomRect.x,
-      layout.bottomRect.y,
-      layout.bottomRect.w,
-      layout.bottomRect.h
-    );
+    if (layout.bottomRect) {
+      context.strokeRect(
+        layout.bottomRect.x,
+        layout.bottomRect.y,
+        layout.bottomRect.w,
+        layout.bottomRect.h
+      );
+    }
 
     const unit = displayUnit(state.meta.unit);
     const unitSuffix = unit ? ` [${unit}]` : "";
@@ -811,27 +832,31 @@ function createChart(canvas, tooltip) {
       layout.topRect.x,
       layout.topRect.y - 8
     );
-    context.fillText(
-      `Rest (Original − geglättet)${unitSuffix}`,
-      layout.bottomRect.x,
-      layout.bottomRect.y - 8
-    );
+    if (layout.bottomRect) {
+      context.fillText(
+        `Rest (Original − geglättet)${unitSuffix}`,
+        layout.bottomRect.x,
+        layout.bottomRect.y - 8
+      );
+    }
 
     // Nullinie im Rest-Panel
-    const zeroY = yToPixel(0, scales.residual, layout.bottomRect);
-    if (
-      zeroY >= layout.bottomRect.y &&
-      zeroY <= layout.bottomRect.y + layout.bottomRect.h
-    ) {
-      context.save();
-      context.setLineDash([4, 4]);
-      context.strokeStyle = CHART_COLORS.zero;
-      context.lineWidth = 1;
-      context.beginPath();
-      context.moveTo(layout.bottomRect.x, zeroY);
-      context.lineTo(layout.bottomRect.x + layout.bottomRect.w, zeroY);
-      context.stroke();
-      context.restore();
+    if (layout.bottomRect) {
+      const zeroY = yToPixel(0, scales.residual, layout.bottomRect);
+      if (
+        zeroY >= layout.bottomRect.y &&
+        zeroY <= layout.bottomRect.y + layout.bottomRect.h
+      ) {
+        context.save();
+        context.setLineDash([4, 4]);
+        context.strokeStyle = CHART_COLORS.zero;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(layout.bottomRect.x, zeroY);
+        context.lineTo(layout.bottomRect.x + layout.bottomRect.w, zeroY);
+        context.stroke();
+        context.restore();
+      }
     }
 
     const points = ensurePoints();
@@ -855,21 +880,24 @@ function createChart(canvas, tooltip) {
     context.restore();
 
     // Rest-Panel
-    context.save();
-    context.beginPath();
-    context.rect(
-      layout.bottomRect.x,
-      layout.bottomRect.y,
-      layout.bottomRect.w,
-      layout.bottomRect.h
-    );
-    context.clip();
-    if (points.residual) {
-      drawPath(points.residual, CHART_COLORS.residual, 1.2, 1);
+    if (layout.bottomRect) {
+      context.save();
+      context.beginPath();
+      context.rect(
+        layout.bottomRect.x,
+        layout.bottomRect.y,
+        layout.bottomRect.w,
+        layout.bottomRect.h
+      );
+      context.clip();
+      if (points.residual) {
+        drawPath(points.residual, CHART_COLORS.residual, 1.2, 1);
+      }
+      context.restore();
     }
-    context.restore();
 
     // X-Achsen-Beschriftung
+    const axisRect = layout.bottomRect || layout.topRect;
     context.font = CHART_FONT_SMALL;
     context.fillStyle = CHART_COLORS.text;
     context.textBaseline = "top";
@@ -887,7 +915,7 @@ function createChart(canvas, tooltip) {
       context.fillText(
         formatXAxisTick(tick, axis),
         x,
-        layout.bottomRect.y + layout.bottomRect.h + 6
+        axisRect.y + axisRect.h + 6
       );
     }
 
@@ -898,7 +926,7 @@ function createChart(canvas, tooltip) {
       '11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
     context.fillText(
       axis.label,
-      layout.bottomRect.x + layout.bottomRect.w / 2,
+      axisRect.x + axisRect.w / 2,
       height - 9
     );
 
@@ -916,7 +944,7 @@ function createChart(canvas, tooltip) {
       context.lineWidth = 1;
       context.beginPath();
       context.moveTo(x, layout.topRect.y);
-      context.lineTo(x, layout.bottomRect.y + layout.bottomRect.h);
+      context.lineTo(x, layoutBottom(layout));
       context.stroke();
       context.restore();
 
@@ -934,7 +962,7 @@ function createChart(canvas, tooltip) {
           CHART_COLORS.smoothed
         );
       }
-      if (state.visible.residual) {
+      if (state.visible.residual && layout.bottomRect) {
         drawDot(
           x,
           yToPixel(state.data.residual[index], scales.residual, layout.bottomRect),
@@ -1041,7 +1069,7 @@ function createChart(canvas, tooltip) {
       mouseX < layout.left ||
       mouseX > layout.left + layout.plotWidth ||
       mouseY < layout.topRect.y ||
-      mouseY > layout.bottomRect.y + layout.bottomRect.h
+      mouseY > layoutBottom(layout)
     ) {
       clearHover();
       return;
@@ -1148,7 +1176,7 @@ function createChart(canvas, tooltip) {
       mouseX < layout.left ||
       mouseX > layout.left + layout.plotWidth ||
       mouseY < layout.topRect.y ||
-      mouseY > layout.bottomRect.y + layout.bottomRect.h
+      mouseY > layoutBottom(layout)
     ) {
       return;
     }
@@ -1261,6 +1289,156 @@ function createChart(canvas, tooltip) {
   canvas.addEventListener("dblclick", onDoubleClick);
   canvas.addEventListener("keydown", onKeyDown);
 
+  // Rendert das Diagramm inklusive Titel, Untertitel und Legende als PNG.
+  // Die Serienauswahl ist unabhängig von den Checkboxen neben dem Diagramm.
+  function renderExportImage(options = {}) {
+    if (!state.data) return null;
+
+    const selected = {
+      original: Boolean(options.original),
+      smoothed: Boolean(options.smoothed),
+      residual: Boolean(options.residual),
+    };
+    if (!selected.original && !selected.smoothed && !selected.residual) {
+      return null;
+    }
+
+    const scale = clamp(options.scale || 2, 1, 3);
+    const title = options.title || "Signal";
+    const subtitle = options.subtitle || "";
+    const previous = {
+      width: state.width,
+      height: state.height,
+      dpr: state.dpr,
+      visible: { ...state.visible },
+      layout: state.layout,
+      scaleCache: state.scaleCache,
+      pointCache: state.pointCache,
+      hover: state.hover,
+    };
+    const chartWidth = previous.width;
+    const chartHeight = previous.height;
+    if (chartWidth < 40 || chartHeight < 40) return null;
+
+    let url = null;
+    try {
+      state.visible = selected;
+      state.dpr = scale;
+      state.hover = null;
+      canvas.width = Math.round(chartWidth * scale);
+      canvas.height = Math.round(chartHeight * scale);
+      invalidate();
+      draw();
+
+      const padding = 18;
+      const headerFont =
+        '600 16px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      const subtitleFont =
+        '11.5px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      const legendFont =
+        '11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+      const output = document.createElement("canvas");
+      const outputContext = output.getContext("2d");
+      if (!outputContext) return null;
+
+      // Höhe des Kopfbereichs anhand der tatsächlichen Texte bestimmen.
+      let headerY = padding;
+      const titleHeight = 23;
+      const subtitleHeight = subtitle ? 17 : 0;
+      const legendHeight = 18;
+      const contentTop =
+        headerY + titleHeight + subtitleHeight + 6 + legendHeight + 10;
+
+      output.width = Math.round((chartWidth + padding * 2) * scale);
+      output.height = Math.round(
+        (contentTop + chartHeight + padding) * scale
+      );
+      outputContext.setTransform(scale, 0, 0, scale, 0, 0);
+      outputContext.fillStyle = CHART_COLORS.background;
+      outputContext.fillRect(
+        0,
+        0,
+        chartWidth + padding * 2,
+        contentTop + chartHeight + padding
+      );
+
+      outputContext.save();
+      outputContext.beginPath();
+      outputContext.rect(padding, 0, chartWidth, contentTop);
+      outputContext.clip();
+      outputContext.textAlign = "left";
+      outputContext.textBaseline = "top";
+      outputContext.font = headerFont;
+      outputContext.fillStyle = CHART_COLORS.axisText;
+      outputContext.fillText(title, padding, headerY);
+      headerY += titleHeight;
+
+      if (subtitle) {
+        outputContext.font = subtitleFont;
+        outputContext.fillStyle = CHART_COLORS.muted;
+        outputContext.fillText(subtitle, padding, headerY);
+        headerY += subtitleHeight;
+      }
+
+      headerY += 6;
+      outputContext.font = legendFont;
+      outputContext.textBaseline = "middle";
+      const legendItems = [];
+      if (selected.original) {
+        legendItems.push({ color: CHART_COLORS.original, label: "Original" });
+      }
+      if (selected.smoothed) {
+        legendItems.push({ color: CHART_COLORS.smoothed, label: "Geglättet" });
+      }
+      if (selected.residual) {
+        legendItems.push({ color: CHART_COLORS.residual, label: "Rest" });
+      }
+      let legendX = padding;
+      for (const item of legendItems) {
+        outputContext.fillStyle = item.color;
+        outputContext.fillRect(legendX, headerY + legendHeight / 2 - 1.5, 18, 3);
+        outputContext.fillStyle = CHART_COLORS.text;
+        outputContext.fillText(item.label, legendX + 24, headerY + legendHeight / 2);
+        legendX += 24 + outputContext.measureText(item.label).width + 18;
+      }
+      outputContext.restore();
+
+      outputContext.drawImage(
+        canvas,
+        padding,
+        contentTop,
+        chartWidth,
+        chartHeight
+      );
+      outputContext.strokeStyle = CHART_COLORS.border;
+      outputContext.lineWidth = 1;
+      outputContext.strokeRect(
+        padding + 0.5,
+        contentTop + 0.5,
+        chartWidth - 1,
+        chartHeight - 1
+      );
+
+      url = output.toDataURL("image/png");
+    } catch (error) {
+      url = null;
+    } finally {
+      canvas.width = Math.round(previous.width * previous.dpr);
+      canvas.height = Math.round(previous.height * previous.dpr);
+      state.width = previous.width;
+      state.height = previous.height;
+      state.dpr = previous.dpr;
+      state.visible = previous.visible;
+      state.layout = previous.layout;
+      state.scaleCache = previous.scaleCache;
+      state.pointCache = previous.pointCache;
+      state.hover = previous.hover;
+      draw();
+    }
+    return url;
+  }
+
   if (typeof ResizeObserver !== "undefined") {
     const observer = new ResizeObserver(() => resize());
     observer.observe(canvas.parentElement);
@@ -1274,6 +1452,7 @@ function createChart(canvas, tooltip) {
     setVisible,
     resetView,
     resize,
+    renderExportImage,
     redraw() {
       invalidate();
       requestDraw();
@@ -1418,6 +1597,16 @@ function cacheDom() {
   els.showOriginal = $("showOriginal");
   els.showSmoothed = $("showSmoothed");
   els.showResidual = $("showResidual");
+  els.exportPng = $("exportPng");
+  els.exportDialog = $("exportDialog");
+  els.exportClose = $("exportClose");
+  els.exportOriginal = $("exportOriginal");
+  els.exportSmoothed = $("exportSmoothed");
+  els.exportResidual = $("exportResidual");
+  els.exportHighRes = $("exportHighRes");
+  els.exportHint = $("exportHint");
+  els.exportCancel = $("exportCancel");
+  els.exportConfirm = $("exportConfirm");
   els.statRmsOriginal = $("statRmsOriginal");
   els.statRmsOriginalUnit = $("statRmsOriginalUnit");
   els.statRmsSmoothed = $("statRmsSmoothed");
@@ -1807,6 +1996,9 @@ function updateControlStates() {
   els.loadButton.disabled = busy;
   els.demoButton.disabled = busy;
   els.resetZoom.disabled = busy || !state.chart || !state.chart.hasData();
+  if (els.exportPng) {
+    els.exportPng.disabled = busy || !state.chart || !state.chart.hasData();
+  }
   els.fileInput.disabled = busy;
   els.dropZone.setAttribute("aria-disabled", busy ? "true" : "false");
 }
@@ -2183,6 +2375,139 @@ function closeBrowser() {
   } else {
     els.browserDialog.removeAttribute("open");
   }
+}
+
+function exportDialogSeries() {
+  return {
+    original: Boolean(els.exportOriginal && els.exportOriginal.checked),
+    smoothed: Boolean(els.exportSmoothed && els.exportSmoothed.checked),
+    residual: Boolean(els.exportResidual && els.exportResidual.checked),
+  };
+}
+
+function syncExportHint() {
+  if (!els.exportHint || !els.exportConfirm) return;
+  const selected = exportDialogSeries();
+  const count =
+    Number(selected.original) +
+    Number(selected.smoothed) +
+    Number(selected.residual);
+  if (!count) {
+    els.exportHint.dataset.kind = "error";
+    els.exportHint.textContent = "Bitte mindestens eine Serie auswählen.";
+    els.exportConfirm.disabled = true;
+  } else {
+    delete els.exportHint.dataset.kind;
+    els.exportHint.textContent = "";
+    els.exportConfirm.disabled = false;
+  }
+}
+
+function openExportDialog() {
+  if (!els.exportDialog || !state.chart || !state.chart.hasData()) return;
+  // Vorbelegung aus den aktuell sichtbaren Serien.
+  els.exportOriginal.checked = els.showOriginal.checked;
+  els.exportSmoothed.checked = els.showSmoothed.checked;
+  els.exportResidual.checked = els.showResidual.checked;
+  els.exportHighRes.checked = true;
+  syncExportHint();
+
+  if (typeof els.exportDialog.showModal === "function") {
+    els.exportDialog.showModal();
+  } else {
+    els.exportDialog.setAttribute("open", "");
+  }
+  els.exportOriginal.focus();
+}
+
+function closeExportDialog() {
+  if (!els.exportDialog) return;
+  if (typeof els.exportDialog.close === "function") {
+    els.exportDialog.close();
+  } else {
+    els.exportDialog.removeAttribute("open");
+  }
+}
+
+function sanitizeFilenamePart(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_.]+|[-_.]+$/g, "")
+    .slice(0, 80);
+}
+
+function exportFilename() {
+  const meta = state.meta && typeof state.meta === "object" ? state.meta : {};
+  const info =
+    state.currentInfo && typeof state.currentInfo === "object"
+      ? state.currentInfo
+      : {};
+  const source = info.source || meta.kind || state.source || "ndbc";
+  const parts = [];
+
+  if (source === "upload") {
+    parts.push(
+      String(info.filename || meta.station_name || "eigene-csv").replace(
+        /\.[^.]+$/,
+        ""
+      )
+    );
+  } else if (source === "demo") {
+    parts.push("demo");
+  } else if (source === "tilt") {
+    parts.push("kippdaten");
+    parts.push(meta.dataset || meta.station || state.tiltDataset || "boje");
+  } else {
+    parts.push("station");
+    parts.push(meta.station || state.stationId || "ndbc");
+    if (meta.variable) parts.push(meta.variable);
+  }
+
+  const base =
+    parts.map(sanitizeFilenamePart).filter(Boolean).join("-") ||
+    "fft-glaettung";
+  return `${base}.png`;
+}
+
+function downloadPng(url, filename) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function handleExportConfirm() {
+  if (!state.chart) return;
+  const selected = exportDialogSeries();
+  if (!selected.original && !selected.smoothed && !selected.residual) {
+    syncExportHint();
+    return;
+  }
+
+  const url = state.chart.renderExportImage({
+    ...selected,
+    scale: els.exportHighRes.checked ? 2 : 1,
+    title: els.chartTitle.textContent || "Signal",
+    subtitle: els.chartSubtitle.textContent || "",
+  });
+
+  if (!url) {
+    els.exportHint.dataset.kind = "error";
+    els.exportHint.textContent =
+      "Der Export ist fehlgeschlagen. Bitte erneut versuchen.";
+    return;
+  }
+
+  const filename = exportFilename();
+  downloadPng(url, filename);
+  closeExportDialog();
+  setStatus("success", `PNG exportiert: ${filename}`);
 }
 
 function handleTiltSelectChange() {
@@ -3191,6 +3516,19 @@ function bindEvents() {
   });
   els.showResidual.addEventListener("change", () => {
     state.chart.setVisible("residual", els.showResidual.checked);
+  });
+
+  els.exportPng.addEventListener("click", openExportDialog);
+  els.exportClose.addEventListener("click", closeExportDialog);
+  els.exportCancel.addEventListener("click", closeExportDialog);
+  els.exportConfirm.addEventListener("click", handleExportConfirm);
+  [els.exportOriginal, els.exportSmoothed, els.exportResidual].forEach(
+    (input) => {
+      input.addEventListener("change", syncExportHint);
+    }
+  );
+  els.exportDialog.addEventListener("click", (event) => {
+    if (event.target === els.exportDialog) closeExportDialog();
   });
 
   els.fileInput.addEventListener("click", (event) => {

@@ -180,6 +180,10 @@ Die Oberfläche bietet:
 - ein interaktives Diagramm mit Original, geglättetem Signal und Rest:
   Mausrad = zoomen, Ziehen = verschieben, Doppelklick = zurücksetzen,
   Hover = Messwerte anzeigen,
+- **PNG-Export** des Diagramms inklusive Titel und Legende. Original,
+  geglättetes Signal und Rest lassen sich für das Bild einzeln auswählen; ohne
+  Rest entfällt das untere Panel. Optional wird mit doppelter Auflösung
+  gerendert,
 - Kennzahlen und Metadaten zur geladenen Messreihe,
 - helles und dunkles Design (folgt der Systemeinstellung, lässt sich oben rechts
   umschalten und wird im Browser gespeichert),

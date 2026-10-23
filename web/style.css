@@ -834,6 +834,21 @@ input[type="range"]:disabled {
   min-width: 0;
 }
 
+.chart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 14px;
+  flex: 0 0 auto;
+}
+
+.chart-export {
+  min-height: 32px;
+  padding: 5px 11px;
+  font-size: 0.78rem;
+}
+
 .chart-title {
   margin: 0;
   font-size: 1.05rem;
@@ -1066,6 +1081,106 @@ input[type="range"]:disabled {
 
 .meta-list dd a {
   word-break: break-all;
+}
+
+/* ------------------------------------------------------------------ */
+/* PNG-Export                                                         */
+/* ------------------------------------------------------------------ */
+
+.export-dialog {
+  width: min(430px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--tooltip-shadow);
+}
+
+.export-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.export-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.export-title {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.export-subtitle {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.export-series {
+  margin: 0;
+  padding: 14px 20px 2px;
+  border: 0;
+}
+
+.export-series legend {
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.export-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.export-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.export-option {
+  margin: 8px 20px 0;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.export-hint {
+  min-height: 1.2em;
+  margin: 8px 20px 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.export-hint[data-kind="error"] {
+  color: var(--danger);
+}
+
+.export-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px 18px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1388,6 +1503,11 @@ input[type="range"]:disabled {
   }
 
   .legend {
+    justify-content: flex-start;
+  }
+
+  .chart-actions {
+    width: 100%;
     justify-content: flex-start;
   }
 }
