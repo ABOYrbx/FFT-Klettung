@@ -13,6 +13,8 @@ bestehenden Module).
 
 Wichtige interne Bausteine (auch für Tests):
     build_ndbc_dataset(...)   – NDBC-Daten laden, filtern, Statistiken
+    build_tilt_dataset(...)   – Kipp-/Neigungsdaten einer Boje verarbeiten
+    build_catalog()           – öffentliche Datenquellen für den Browser
     build_demo_dataset(...)   – eingebaute Demo
     build_upload_dataset(...) – hochgeladene CSV-Daten verarbeiten
     parse_data_query(...)     – strenge Prüfung der GET-Parameter
@@ -21,6 +23,8 @@ Wichtige interne Bausteine (auch für Tests):
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import math
 import mimetypes
@@ -31,6 +35,7 @@ import threading
 import time
 import traceback
 import urllib.error
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -179,6 +184,223 @@ STATIONS_BY_ID = {station.id: station for station in STATIONS}
 
 
 # ---------------------------------------------------------------------------
+# Öffentliche Datenquellen: NDBC-Katalog und Kipp-Daten
+# ---------------------------------------------------------------------------
+
+NDBC_ACTIVE_STATIONS_URL = "https://www.ndbc.noaa.gov/activestations.xml"
+GOMOOS_TILT_URL_TEMPLATE = (
+    "http://gyre.umeoce.maine.edu/data/gomoos/buoy/php/view_csv_file.php"
+    "?ncfile=%2Fdata%2Fgomoos%2Fbuoy%2Farchive%2F{dataset}%2Frealtime%2F"
+    "{dataset}.aanderaa.tilt.realtime.nc"
+)
+TILT_PATTERN = re.compile(r"^B\d{4}$")
+
+
+@dataclass(frozen=True)
+class TiltDataset:
+    """Eine Verankerung mit öffentlich abrufbaren Kipp-/Neigungswerten."""
+
+    id: str
+    name: str
+    latitude: float
+    longitude: float
+    region: str
+    start: str
+    end: str | None
+    note: str = ""
+
+    @property
+    def position(self) -> str:
+        return ndbc.format_position(self.latitude, self.longitude)
+
+    @property
+    def period(self) -> str:
+        if self.end:
+            return f"{self.start} – {self.end}"
+        return f"seit {self.start}"
+
+    def as_dict(self) -> dict[str, Any]:
+        tags = ["Kipp-Daten"]
+        if self.end is None:
+            tags.append("aktuell")
+        return {
+            "kind": "tilt",
+            "id": self.id,
+            "name": self.name,
+            "position": self.position,
+            "region": self.region,
+            "tags": tags,
+            "detail": f"Neigung (°), stündlich · {self.period}",
+            "period": self.period,
+            "variable": "TILT",
+            "unit": "°",
+            "note": self.note,
+        }
+
+
+# Alle Verankerungen liegen auf dem Western Maine Shelf. Die Dateien des
+# GoMOOS/NERACOOS-Servers enthalten stündliche Aanderaa-Neigungswerte.
+TILT_DATASETS: tuple[TiltDataset, ...] = (
+    TiltDataset(
+        "B0139",
+        "GoMOOS-Boje B0139 – Western Maine Shelf",
+        43.1795,
+        -70.4267,
+        "Golf von Maine (USA)",
+        "2024-12-15",
+        None,
+        "Aktuelle Verankerung; die Neigung wird stündlich aktualisiert.",
+    ),
+    TiltDataset(
+        "B0137",
+        "GoMOOS-Boje B0137 – Western Maine Shelf",
+        43.1795,
+        -70.4267,
+        "Golf von Maine (USA)",
+        "2022-09-09",
+        "2024-01-03",
+    ),
+    TiltDataset(
+        "B0133",
+        "GoMOOS-Boje B0133 – Western Maine Shelf",
+        43.1795,
+        -70.4267,
+        "Golf von Maine (USA)",
+        "2019-06-01",
+        "2020-01-23",
+    ),
+    TiltDataset(
+        "B0132",
+        "GoMOOS-Boje B0132 – Western Maine Shelf",
+        43.1795,
+        -70.4267,
+        "Golf von Maine (USA)",
+        "2018-10-01",
+        "2019-06-01",
+    ),
+)
+TILT_DATASETS_BY_ID = {dataset.id: dataset for dataset in TILT_DATASETS}
+
+
+# Weitere öffentliche Quellen aus DATENQUELLEN.md. Sie lassen sich im
+# Datenbrowser durchsuchen und öffnen, aber nicht direkt in der App laden.
+PUBLIC_LINKS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "cdip",
+        "name": "CDIP – Küstenbojen mit Rohdaten",
+        "url": "https://cdip.ucsd.edu/",
+        "region": "Kalifornien / weltweit",
+        "tags": ["Rohdaten 1–2 Hz"],
+        "detail": "Bojenbewegung und Wellenspektren; NetCDF über THREDDS.",
+    },
+    {
+        "id": "cefas",
+        "name": "Cefas WaveNet",
+        "url": "https://wavenet.cefas.co.uk/",
+        "region": "Großbritannien",
+        "tags": ["Wellen", "30 min"],
+        "detail": "Wellenhöhe, -periode und -richtung als CSV im Browser.",
+    },
+    {
+        "id": "marine-ie",
+        "name": "Marine Institute ERDDAP",
+        "url": "https://erddap.marine.ie/erddap/index.html",
+        "region": "Irland",
+        "tags": ["Wellen", "Meteo", "ERDDAP"],
+        "detail": "Wetterbojen M2–M6, stündlich, CSV/JSON/NetCDF.",
+    },
+    {
+        "id": "emodnet",
+        "name": "EMODnet Physics",
+        "url": "https://emodnet.ec.europa.eu/en/physics",
+        "region": "Europa",
+        "tags": ["Aggregiert", "ERDDAP"],
+        "detail": "Bojen, Glider und Plattformen aus vielen europäischen Netzen.",
+    },
+    {
+        "id": "rws",
+        "name": "Rijkswaterstaat Waterinfo",
+        "url": "https://waterinfo.rws.nl/",
+        "region": "Niederlande",
+        "tags": ["Wasserstand", "Wellen"],
+        "detail": "Nordsee und Flüsse, meist 10-Minuten- bis Stundenwerte.",
+    },
+    {
+        "id": "bsh",
+        "name": "BSH – MARNET und Seegang",
+        "url": "https://www.bsh.de/DE/DATEN/daten_node.html",
+        "region": "Deutsche Nord- und Ostsee",
+        "tags": ["Meteo", "30 min"],
+        "detail": "Messnetz MARNET und Seegangsstatistiken; teils Registrierung.",
+    },
+    {
+        "id": "gomoos",
+        "name": "GoMOOS / NERACOOS – Bojendaten",
+        "url": "https://data.neracoos.org/erddap/",
+        "region": "Golf von Maine (USA)",
+        "tags": ["Kipp-Daten", "ERDDAP"],
+        "detail": "Quelle der Kipp-Daten; weitere Meteo- und Ozeanwerte.",
+    },
+    {
+        "id": "pmel",
+        "name": "PMEL GTMBA (TAO/PIRATA/RAMA)",
+        "url": "https://www.pmel.noaa.gov/gtmba/data-access/disdel",
+        "region": "Tropischer Pazifik, Atlantik, Indik",
+        "tags": ["Meteo", "Wellen"],
+        "detail": "Verankerte tropische Bojen, Text- und NetCDF-Formate.",
+    },
+    {
+        "id": "copernicus",
+        "name": "Copernicus Marine",
+        "url": "https://marine.copernicus.eu/access-data",
+        "region": "global",
+        "tags": ["In-situ", "Modelle"],
+        "detail": "In-situ- und Modelldaten; kostenloses Konto erforderlich.",
+    },
+    {
+        "id": "ooi",
+        "name": "OOI – Ocean Observatories Initiative",
+        "url": "https://ooinet.oceanobservatories.org/",
+        "region": "USA, Küsten und offener Ozean",
+        "tags": ["Rohdaten", "bis 1 Hz"],
+        "detail": "Observatorien mit hochaufgelösten Meteo- und Ozeanmessungen.",
+    },
+    {
+        "id": "pangaea",
+        "name": "PANGAEA – Datenarchiv",
+        "url": "https://www.pangaea.de/",
+        "region": "weltweit",
+        "tags": ["Archiv", "DOI"],
+        "detail": "Zitierbare Forschungsdatensätze, Formate sehr unterschiedlich.",
+    },
+    {
+        "id": "imos",
+        "name": "IMOS AODN",
+        "url": "https://portal.aodn.org.au/",
+        "region": "Australien",
+        "tags": ["Wellen", "NetCDF"],
+        "detail": "Australische Wellenbojen und Ozeandaten, frei zugänglich.",
+    },
+    {
+        "id": "meds",
+        "name": "MEDS/DFO",
+        "url": "https://www.meds-sdmm.dfo-mpo.gc.ca/",
+        "region": "Kanada",
+        "tags": ["Wellen", "Meteo"],
+        "detail": "Kanadische Bojen, Wellen und Meteo, CSV.",
+    },
+    {
+        "id": "coops",
+        "name": "NOAA Tides & Currents (CO-OPS)",
+        "url": "https://tidesandcurrents.noaa.gov/",
+        "region": "USA",
+        "tags": ["Wasserstand", "Strömung"],
+        "detail": "Gezeiten, Wasserstände und Strömungen an Küstenstationen.",
+    },
+)
+
+
+# ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
 
@@ -212,6 +434,8 @@ class TTLCache:
 
 
 CACHE = TTLCache()
+# Die Stationsliste ändert sich selten; eine Stunde Cache reicht.
+CATALOG_CACHE = TTLCache(3600.0)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +459,17 @@ def validate_station(station: str) -> str:
     if not STATION_PATTERN.fullmatch(text):
         raise ValueError(
             "Ungültige Stationskennung. Erlaubt sind 3 bis 10 Buchstaben oder Ziffern."
+        )
+    return text
+
+
+def validate_tilt_dataset(dataset: str) -> str:
+    """Prüft die Kennung einer Kipp-Daten-Verankerung (z. B. B0139)."""
+    text = str(dataset).strip().upper()
+    if not TILT_PATTERN.fullmatch(text) or text not in TILT_DATASETS_BY_ID:
+        available = ", ".join(sorted(TILT_DATASETS_BY_ID))
+        raise ValueError(
+            f"Unbekannter Kipp-Datensatz {dataset!r}. Verfügbar: {available}."
         )
     return text
 
@@ -329,6 +564,8 @@ class DataQuery:
     """Geprüfte Parameter für GET /api/data."""
 
     demo: bool
+    tilt: bool
+    dataset: str | None
     station: str | None
     variable: str
     year: int | None
@@ -345,6 +582,8 @@ class DataQuery:
         return (
             "data",
             self.demo,
+            self.tilt,
+            self.dataset,
             self.station,
             self.variable,
             self.year,
@@ -363,15 +602,31 @@ def parse_data_query(params: dict[str, list[str]]) -> DataQuery:
     """Prüft alle Parameter von GET /api/data streng."""
     demo_raw = _single_param(params, "demo")
     demo = parse_bool(demo_raw, "demo") if demo_raw is not None else False
+    tilt_raw = _single_param(params, "tilt")
+    tilt = parse_bool(tilt_raw, "tilt") if tilt_raw is not None else False
+    if demo and tilt:
+        raise ValueError("'demo' und 'tilt' können nicht kombiniert werden.")
 
     if demo:
         station: str | None = None
         variable = "signal"
         year: int | None = None
+        dataset: str | None = None
+    elif tilt:
+        station = None
+        variable = "TILT"
+        year = None
+        dataset_raw = _single_param(params, "dataset")
+        dataset = validate_tilt_dataset(
+            dataset_raw if dataset_raw is not None else "B0139"
+        )
     else:
+        dataset = None
         station_raw = _single_param(params, "station")
         if station_raw is None:
-            raise ValueError("Parameter 'station' fehlt (oder demo=1 verwenden).")
+            raise ValueError(
+                "Parameter 'station' fehlt (oder demo=1 bzw. tilt=1 verwenden)."
+            )
         station = validate_station(station_raw)
         variable_raw = _single_param(params, "variable")
         variable = validate_variable(variable_raw if variable_raw is not None else "WVHT")
@@ -418,6 +673,8 @@ def parse_data_query(params: dict[str, list[str]]) -> DataQuery:
 
     return DataQuery(
         demo=demo,
+        tilt=tilt,
+        dataset=dataset,
         station=station,
         variable=variable,
         year=year,
@@ -967,6 +1224,323 @@ def build_ndbc_dataset(
 
 
 # ---------------------------------------------------------------------------
+# Kipp-Daten (Bojen-Neigung)
+# ---------------------------------------------------------------------------
+
+def _parse_gomoos_timestamp(token: str) -> datetime:
+    """Liest die Zeitstempel der GoMOOS-CSV (UTC, ohne Zeitzonenangabe)."""
+    text = token.strip()
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    raise ValueError(f"Ungültiger Zeitstempel: {token!r}")
+
+
+def _parse_tilt_csv(text: str) -> tuple[list[tuple[datetime, float]], int]:
+    """Liest Zeitstempel und Neigungswerte aus der GoMOOS-CSV."""
+    reader = csv.reader(io.StringIO(text))
+    header = next(reader, None)
+    if not header:
+        raise ValueError("Die Kipp-Daten-Datei ist leer.")
+    tilt_column = next(
+        (
+            index
+            for index, name in enumerate(header)
+            if name.strip().lower().startswith("tilt")
+        ),
+        None,
+    )
+    if tilt_column is None:
+        raise ValueError("Die Kipp-Daten-Datei enthält keine tilt-Spalte.")
+
+    pairs: list[tuple[datetime, float]] = []
+    skipped = 0
+    for row in reader:
+        if not row or not any(field.strip() for field in row):
+            continue
+        if len(row) <= tilt_column:
+            skipped += 1
+            continue
+        token = row[tilt_column].strip()
+        if not token:
+            # Keine Messung in dieser Stunde (z. B. Sensor noch nicht aktiv).
+            continue
+        try:
+            value = float(token)
+        except ValueError:
+            skipped += 1
+            continue
+        if not math.isfinite(value) or not 0.0 <= value <= 90.0:
+            skipped += 1
+            continue
+        try:
+            timestamp = _parse_gomoos_timestamp(row[0])
+        except (ValueError, IndexError):
+            skipped += 1
+            continue
+        pairs.append((timestamp, value))
+    return pairs, skipped
+
+
+def build_tilt_dataset(
+    dataset: str = "B0139",
+    days: float = 30.0,
+    cutoff: float = 0.1,
+    filter_kind: str = "butterworth",
+    order: int = 4,
+    detrend: bool = True,
+    pad: float = 0.1,
+    max_gap_min: float | None = None,
+    keep_gaps: bool = False,
+) -> dict[str, Any]:
+    """Lädt Neigungswerte einer GoMOOS-Boje und glättet sie.
+
+    Die Datei enthält stündliche Werte. ``days=0`` verwendet den gesamten
+    verfügbaren Zeitraum, ansonsten die letzten ``days`` Tage bezogen auf den
+    neuesten Messwert (bei historischen Verankerungen also das Ende der
+    damaligen Messreihe).
+    """
+    dataset = validate_tilt_dataset(dataset)
+    filter_kind = validate_filter_name(filter_kind)
+    if not 0.0 < cutoff <= 1.0:
+        raise ValueError("Der Parameter cutoff muss im Bereich (0, 1] liegen.")
+    if not 1 <= order <= 8:
+        raise ValueError("Der Parameter order muss zwischen 1 und 8 liegen.")
+    if not 0.0 <= pad <= 0.95:
+        raise ValueError("Der Parameter pad muss zwischen 0 und 0.95 liegen.")
+    if days < 0.0 or days > 1000.0:
+        raise ValueError("Der Parameter days muss zwischen 0 und 1000 liegen.")
+    if max_gap_min is not None and max_gap_min <= 0.0:
+        raise ValueError("Der Parameter max_gap_min muss positiv sein.")
+
+    entry = TILT_DATASETS_BY_ID[dataset]
+    url = GOMOOS_TILT_URL_TEMPLATE.format(dataset=dataset)
+    text = ndbc.fetch_text(url)
+    pairs, skipped = _parse_tilt_csv(text)
+    if not pairs:
+        raise ValueError(
+            f"Keine gültigen Neigungswerte für {dataset} gefunden. "
+            "Bitte einen anderen Datensatz wählen."
+        )
+
+    pairs.sort(key=lambda pair: pair[0])
+    deduplicated: dict[datetime, float] = {}
+    for timestamp, value in pairs:
+        deduplicated[timestamp] = value
+    pairs = sorted(deduplicated.items())
+
+    if days > 0.0:
+        newest = pairs[-1][0]
+        oldest = newest - timedelta(days=days)
+        pairs = [pair for pair in pairs if pair[0] >= oldest]
+    if not pairs:
+        raise ValueError(
+            "Im gewählten Zeitraum liegen keine Daten. "
+            "Bitte einen größeren Zeitraum wählen."
+        )
+
+    if keep_gaps:
+        chosen = pairs
+    else:
+        # Stündliche Werte: einzelne fehlende Stunden werden überbrückt,
+        # größere Lücken trennen die Abschnitte.
+        gap_limit = max_gap_min if max_gap_min is not None else 180.0
+        segments = ndbc.split_segments(pairs, gap_limit)
+        chosen = max(segments, key=lambda segment: (len(segment), segment[-1][0]))
+
+    if len(chosen) < 4:
+        raise ValueError("Der gewählte Abschnitt hat weniger als 4 Punkte.")
+
+    start, end = chosen[0][0], chosen[-1][0]
+    x = np.round(
+        np.asarray(
+            [(timestamp - start).total_seconds() / 3600.0 for timestamp, _ in chosen],
+            dtype=float,
+        ),
+        6,
+    )
+    y = np.asarray([value for _, value in chosen], dtype=float)
+
+    result = smooth_series(
+        x,
+        y,
+        cutoff=cutoff,
+        filter_kind=filter_kind,
+        order=order,
+        detrend=detrend,
+        pad=pad,
+    )
+
+    median_dx = result.median_dx
+    sampling_min = median_dx * 60.0
+    fs_hz = 1.0 / (median_dx * 3600.0) if median_dx > 0.0 else None
+    cutoff_hz = cutoff * fs_hz / 2.0 if fs_hz is not None else None
+    nyquist_hz = fs_hz / 2.0 if fs_hz is not None else None
+    duration_h = float(result.x[-1] - result.x[0])
+
+    stats = dict(result.stats)
+    stats["tilt_mean"] = float(np.mean(y))
+    stats["tilt_max"] = float(np.max(y))
+
+    meta: dict[str, Any] = {
+        "kind": "tilt",
+        "dataset": dataset,
+        "station": dataset,
+        "station_name": entry.name,
+        "position": entry.position,
+        "station_type": "Verankerte Boje (Aanderaa-Tilt-Sensor)",
+        "variable": "TILT",
+        "unit": "°",
+        "description": "Neigung der Boje gegenüber der Vertikalen",
+        "deployment": entry.period,
+        "source_url": url,
+        "license": "GoMOOS/NERACOOS – öffentlich (University of Maine)",
+        "start": _iso_utc(start),
+        "end": _iso_utc(end),
+        "points": int(result.x.size),
+        "duration_h": duration_h,
+        "sampling_min": sampling_min,
+        "sampling_value": sampling_min,
+        "sampling_unit": "min",
+        "max_gap_min": _max_gap_minutes(chosen),
+        "skipped": int(skipped),
+        "x_unit": "h",
+        "cutoff": float(cutoff),
+        "cutoff_hz": cutoff_hz,
+        "nyquist_hz": nyquist_hz,
+        "filter": filter_kind,
+        "filter_label": filter_label(filter_kind, order),
+        "order": int(order),
+        "detrend": bool(detrend),
+        "pad": float(pad),
+        "resampled": result.resampled,
+        "stats": stats,
+    }
+    return {"meta": meta, "series": _series_payload(result)}
+
+
+# ---------------------------------------------------------------------------
+# Datenbrowser: öffentliche Quellen
+# ---------------------------------------------------------------------------
+
+def _fetch_active_stations() -> list[dict[str, Any]]:
+    """Liest die aktiven NDBC-Stationen aus activestations.xml."""
+    text = ndbc.fetch_text(NDBC_ACTIVE_STATIONS_URL)
+    root = ET.fromstring(text)
+    entries: list[dict[str, Any]] = []
+    for node in root.findall("station"):
+        station_id = (node.get("id") or "").strip().upper()
+        if not STATION_PATTERN.fullmatch(station_id):
+            continue
+        try:
+            latitude = float(node.get("lat", ""))
+            longitude = float(node.get("lon", ""))
+        except (TypeError, ValueError):
+            continue
+
+        name = " ".join((node.get("name") or "").split()) or station_id
+        station_type = " ".join((node.get("type") or "").split())
+        tags: list[str] = []
+        if node.get("met") == "y":
+            tags.append("Meteo")
+        if node.get("currents") == "y":
+            tags.append("Strömung")
+        if node.get("waterquality") == "y":
+            tags.append("Wasserqualität")
+        if node.get("dart") == "y":
+            tags.append("Tsunami")
+        if not tags:
+            tags.append("Messstation")
+
+        curated = STATIONS_BY_ID.get(station_id)
+        entries.append(
+            {
+                "kind": "ndbc",
+                "id": station_id,
+                "name": name,
+                "position": ndbc.format_position(latitude, longitude),
+                "region": curated.region if curated else "Weitere NDBC-Stationen",
+                "tags": tags,
+                "detail": " · ".join(
+                    part for part in (station_type or "Station", ", ".join(tags)) if part
+                ),
+                "type": station_type,
+                "met": node.get("met") == "y",
+                "currents": node.get("currents") == "y",
+                "waterquality": node.get("waterquality") == "y",
+                "dart": node.get("dart") == "y",
+            }
+        )
+    if not entries:
+        raise ValueError("Die NDBC-Stationsliste enthält keine Stationen.")
+    return entries
+
+
+def build_catalog() -> dict[str, Any]:
+    """Stellt alle Einträge für den Datenbrowser zusammen.
+
+    NDBC wird live aus ``activestations.xml`` gelesen. Ist der Server nicht
+    erreichbar, bleiben die kuratierten Stationen verfügbar. Kipp-Daten und
+    die weiteren Quellen sind lokal hinterlegt.
+    """
+    entries: list[dict[str, Any]] = []
+    warning: str | None = None
+    try:
+        entries.extend(_fetch_active_stations())
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        OSError,
+        ValueError,
+        ET.ParseError,
+    ) as exc:
+        warning = (
+            "Die aktuelle NDBC-Stationsliste ist nicht erreichbar "
+            f"({exc}). Es werden nur die kuratierten Stationen angezeigt."
+        )
+        for station in STATIONS:
+            entries.append(
+                {
+                    "kind": "ndbc",
+                    "id": station.id,
+                    "name": station.name,
+                    "position": station.position,
+                    "region": station.region,
+                    "tags": ["kuratiert"],
+                    "detail": "Kuratierte NDBC-Station",
+                }
+            )
+
+    entries.extend(dataset.as_dict() for dataset in TILT_DATASETS)
+    for link in PUBLIC_LINKS:
+        entries.append({**link, "kind": "link"})
+
+    return {
+        "entries": entries,
+        "sources": [
+            {
+                "id": "ndbc",
+                "name": "NOAA National Data Buoy Center",
+                "url": "https://www.ndbc.noaa.gov/",
+                "description": "Aktive Bojen, Feststationen und Partnerstationen.",
+                "license": "US-Bundesdaten (gemeinfrei)",
+            },
+            {
+                "id": "gomoos",
+                "name": "GoMOOS / NERACOOS",
+                "url": "https://data.neracoos.org/erddap/",
+                "description": "Bojen im Golf von Maine, inklusive Neigungsdaten.",
+                "license": "Öffentlich (University of Maine)",
+            },
+        ],
+        "warning": warning,
+        "generated": _iso_utc(datetime.now(timezone.utc)),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Demo
 # ---------------------------------------------------------------------------
 
@@ -1340,6 +1914,18 @@ class WebUIHandler(BaseHTTPRequestHandler):
             self._run_api(lambda: {"stations": [s.as_dict() for s in STATIONS]})
             return
 
+        if path == "/api/catalog":
+            def catalog() -> dict[str, Any]:
+                cached = CATALOG_CACHE.get("catalog")
+                if cached is not None:
+                    return cached
+                result = build_catalog()
+                CATALOG_CACHE.set("catalog", result)
+                return result
+
+            self._run_api(catalog)
+            return
+
         if path == "/api/variables":
             def variables() -> dict[str, Any]:
                 raw = _single_param(params, "station")
@@ -1371,6 +1957,19 @@ class WebUIHandler(BaseHTTPRequestHandler):
                         order=query_params.order,
                         detrend=query_params.detrend,
                         pad=query_params.pad,
+                    )
+                elif query_params.tilt:
+                    assert query_params.dataset is not None
+                    result = build_tilt_dataset(
+                        dataset=query_params.dataset,
+                        days=query_params.days,
+                        cutoff=query_params.cutoff,
+                        filter_kind=query_params.filter_kind,
+                        order=query_params.order,
+                        detrend=query_params.detrend,
+                        pad=query_params.pad,
+                        max_gap_min=query_params.max_gap_min,
+                        keep_gaps=query_params.keep_gaps,
                     )
                 else:
                     assert query_params.station is not None

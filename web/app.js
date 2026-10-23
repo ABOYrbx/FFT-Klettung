@@ -1294,6 +1294,13 @@ const state = {
   stationId: "46001",
   variableId: "WVHT",
   variables: [],
+  tiltDatasets: [],
+  tiltDataset: null,
+  catalog: null,
+  catalogLoading: false,
+  catalogWarning: "",
+  catalogError: "",
+  browserFilter: "all",
   source: "ndbc",
   data: null,
   meta: null,
@@ -1301,6 +1308,7 @@ const state = {
   busy: false,
   lastUpload: null,
   startDemo: false,
+  startTilt: null,
   activeAbort: null,
   loadSeq: 0,
   chart: null,
@@ -1366,11 +1374,21 @@ function toggleTheme() {
 
 function cacheDom() {
   els.themeToggle = $("themeToggle");
+  els.browserButton = $("browserButton");
+  els.browserDialog = $("browserDialog");
+  els.browserClose = $("browserClose");
+  els.browserSearch = $("browserSearch");
+  els.browserFilters = $("browserFilters");
+  els.browserCount = $("browserCount");
+  els.browserList = $("browserList");
+  els.browserEmpty = $("browserEmpty");
+  els.browserNote = $("browserNote");
   els.controls = document.querySelector(".controls");
   els.stationSelect = $("stationSelect");
   els.stationInput = $("stationInput");
   els.stationLoad = $("stationLoad");
   els.variableSelect = $("variableSelect");
+  els.tiltSelect = $("tiltSelect");
   els.daysField = $("daysField");
   els.daysInput = $("daysInput");
   els.daysHint = $("daysHint");
@@ -1453,6 +1471,7 @@ function availabilityIsKnown() {
 }
 
 function realtimeMaxDays() {
+  if (state.tiltDataset) return 1000;
   const range = realtimeRange();
   const value = range ? Number(range.max_days) : NaN;
   if (!Number.isFinite(value)) return 365;
@@ -1503,6 +1522,12 @@ function populateYearOptions() {
 }
 
 function updateRealtimeHint() {
+  if (state.tiltDataset) {
+    els.daysInput.max = "1000";
+    els.daysHint.textContent =
+      "Stündliche Neigungswerte · 0 = alle verfügbaren Daten";
+    return;
+  }
   if (!availabilityIsKnown()) {
     els.daysInput.max = "365";
     els.daysHint.textContent = "0 = alle verfügbaren Daten";
@@ -1622,6 +1647,10 @@ function buildDataParams(settings, options = {}) {
   const demo = Boolean(options.demo);
   if (demo) {
     params.set("demo", "1");
+  } else if (options.tilt) {
+    params.set("tilt", "1");
+    params.set("dataset", String(options.tilt).toUpperCase());
+    params.set("days", String(settings.days));
   } else {
     params.set("station", settings.station);
     params.set("variable", settings.variable);
@@ -1745,17 +1774,24 @@ function updateControlStates() {
   const mode = getTimeMode();
   const butterworth = els.filterSelect.value === "butterworth";
   const uploadMode = state.source === "upload";
+  const tiltMode = Boolean(state.tiltDataset);
   const known = availabilityIsKnown();
   const hasRealtime = !known || Boolean(realtimeRange());
   const hasYears = !known || availableYears().length > 0;
 
-  els.stationSelect.disabled = busy;
-  els.stationInput.disabled = busy;
-  els.stationLoad.disabled = busy;
+  els.stationSelect.disabled = busy || tiltMode;
+  els.stationInput.disabled = busy || tiltMode;
+  els.stationLoad.disabled = busy || tiltMode;
+  els.tiltSelect.disabled = busy;
   els.variableSelect.disabled =
-    busy || !state.variables.length || uploadMode;
+    busy || tiltMode || !state.variables.length || uploadMode;
   els.timeRadios.forEach((radio) => {
-    const unavailable = radio.value === "realtime" ? !hasRealtime : !hasYears;
+    const unavailable =
+      tiltMode && radio.value === "year"
+        ? true
+        : radio.value === "realtime"
+          ? !hasRealtime
+          : !hasYears;
     radio.disabled = busy || unavailable;
   });
   els.daysField.hidden = mode === "year";
@@ -1924,6 +1960,243 @@ function populateVariables() {
   }
   els.variableSelect.value = state.variableId;
   updateControlStates();
+}
+
+/* --------------------------------------------------------------------------
+   Kipp-Daten und Datenbrowser
+   -------------------------------------------------------------------------- */
+
+function populateTiltOptions() {
+  const previous = state.tiltDataset || els.tiltSelect.value;
+  els.tiltSelect.textContent = "";
+
+  const off = document.createElement("option");
+  off.value = "";
+  off.textContent = "Aus – NDBC-Station verwenden";
+  els.tiltSelect.appendChild(off);
+
+  for (const dataset of state.tiltDatasets) {
+    if (!dataset || !dataset.id) continue;
+    const option = document.createElement("option");
+    option.value = dataset.id;
+    const region = dataset.region ? ` · ${dataset.region}` : "";
+    const period = dataset.period ? ` · ${dataset.period}` : "";
+    option.textContent = `${dataset.id}${region}${period}`;
+    option.title = dataset.detail || dataset.name || dataset.id;
+    els.tiltSelect.appendChild(option);
+  }
+
+  if (
+    previous &&
+    state.tiltDatasets.some((dataset) => dataset.id === previous)
+  ) {
+    els.tiltSelect.value = previous;
+  }
+}
+
+function catalogEntries() {
+  if (!state.catalog || !Array.isArray(state.catalog.entries)) return [];
+  return state.catalog.entries;
+}
+
+async function loadCatalog(options = {}) {
+  if (state.catalog) return state.catalog;
+  if (state.catalogLoading) return null;
+
+  state.catalogLoading = true;
+  els.browserCount.textContent = "Datenquellen werden geladen …";
+  try {
+    const payload = await fetchJSON("/api/catalog");
+    state.catalog = payload;
+    state.tiltDatasets = (Array.isArray(payload.entries) ? payload.entries : [])
+      .filter((entry) => entry && entry.kind === "tilt");
+    state.catalogWarning =
+      typeof payload.warning === "string" ? payload.warning.trim() : "";
+    state.catalogError = "";
+    populateTiltOptions();
+    renderBrowser();
+    return payload;
+  } catch (error) {
+    state.catalogError = errorMessage(error);
+    els.browserCount.textContent = "Katalog nicht erreichbar.";
+    els.browserNote.textContent = state.catalogError;
+    if (!options.silent) showError(state.catalogError);
+    return null;
+  } finally {
+    state.catalogLoading = false;
+  }
+}
+
+function syncBrowserFilters() {
+  const buttons = els.browserFilters.querySelectorAll("button[data-kind]");
+  buttons.forEach((button) => {
+    const active = button.dataset.kind === state.browserFilter;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function browserEntryMatches(entry, query) {
+  if (!query) return true;
+  const parts = [
+    entry.id,
+    entry.name,
+    entry.region,
+    entry.position,
+    entry.detail,
+    entry.period,
+    entry.type,
+  ];
+  if (Array.isArray(entry.tags)) parts.push(...entry.tags);
+  return parts
+    .filter((part) => typeof part === "string")
+    .join(" ")
+    .toLowerCase()
+    .includes(query);
+}
+
+function browserEntryNode(entry) {
+  const item = document.createElement("li");
+  item.className = "browser-item";
+
+  const isLink = entry.kind === "link";
+  const node = document.createElement(isLink ? "a" : "button");
+  node.className = "browser-entry";
+  if (isLink) {
+    node.href = entry.url || "#";
+    node.target = "_blank";
+    node.rel = "noopener";
+  } else {
+    node.type = "button";
+  }
+
+  const title = document.createElement("span");
+  title.className = "browser-entry-title";
+  if (entry.kind === "ndbc" || entry.kind === "tilt") {
+    const id = document.createElement("span");
+    id.className = "browser-entry-id";
+    id.textContent = entry.id;
+    title.appendChild(id);
+  }
+  const name = document.createElement("span");
+  name.textContent = entry.name || entry.id || "Eintrag";
+  title.appendChild(name);
+  node.appendChild(title);
+
+  const detailText = [entry.position, entry.detail || entry.region]
+    .filter((part) => typeof part === "string" && part.trim())
+    .join(" · ");
+  if (detailText) {
+    const detail = document.createElement("span");
+    detail.className = "browser-entry-detail";
+    detail.textContent = detailText;
+    node.appendChild(detail);
+  }
+
+  if (Array.isArray(entry.tags) && entry.tags.length) {
+    const tags = document.createElement("span");
+    tags.className = "browser-tags";
+    for (const tag of entry.tags) {
+      const badge = document.createElement("span");
+      badge.className = `browser-tag is-${entry.kind}`;
+      badge.textContent = tag;
+      tags.appendChild(badge);
+    }
+    node.appendChild(tags);
+  }
+
+  if (!isLink) {
+    node.addEventListener("click", () => chooseBrowserEntry(entry));
+  }
+  item.appendChild(node);
+  return item;
+}
+
+function renderBrowser() {
+  if (!els.browserList) return;
+  const query = els.browserSearch.value.trim().toLowerCase();
+  const matched = catalogEntries().filter((entry) => {
+    if (!entry) return false;
+    if (state.browserFilter !== "all" && entry.kind !== state.browserFilter) {
+      return false;
+    }
+    return browserEntryMatches(entry, query);
+  });
+
+  const limit = 250;
+  const entries = matched.slice(0, limit);
+  const fragment = document.createDocumentFragment();
+  for (const entry of entries) fragment.appendChild(browserEntryNode(entry));
+  els.browserList.replaceChildren(fragment);
+  els.browserEmpty.hidden = matched.length > 0;
+
+  const total = catalogEntries().length;
+  if (!total) {
+    els.browserCount.textContent = "Keine Einträge verfügbar";
+  } else if (matched.length > entries.length) {
+    els.browserCount.textContent =
+      `${nf0.format(entries.length)} von ${nf0.format(matched.length)} Treffern ` +
+      `(${nf0.format(total)} gesamt) · Suche eingrenzen`;
+  } else {
+    els.browserCount.textContent =
+      `${nf0.format(matched.length)} von ${nf0.format(total)} Einträgen`;
+  }
+
+  const sourceNote =
+    "NDBC: NOAA (öffentlich) · Kipp-Daten: GoMOOS/NERACOOS (University of Maine)";
+  els.browserNote.textContent = state.catalogWarning
+    ? `${state.catalogWarning} · ${sourceNote}`
+    : sourceNote;
+}
+
+function chooseBrowserEntry(entry) {
+  closeBrowser();
+  if (entry.kind === "tilt") {
+    loadTilt(entry.id);
+  } else if (entry.kind === "ndbc") {
+    state.variableId = els.variableSelect.value || state.variableId;
+    loadStation(entry.id);
+  }
+}
+
+function openBrowser() {
+  if (!els.browserDialog) return;
+  els.browserSearch.value = "";
+  state.browserFilter = "all";
+  syncBrowserFilters();
+
+  if (typeof els.browserDialog.showModal === "function") {
+    els.browserDialog.showModal();
+  } else {
+    els.browserDialog.setAttribute("open", "");
+  }
+
+  if (state.catalog) renderBrowser();
+  else loadCatalog();
+  els.browserSearch.focus();
+}
+
+function closeBrowser() {
+  if (!els.browserDialog) return;
+  if (typeof els.browserDialog.close === "function") {
+    els.browserDialog.close();
+  } else {
+    els.browserDialog.removeAttribute("open");
+  }
+}
+
+function handleTiltSelectChange() {
+  if (state.busy) return;
+  const value = els.tiltSelect.value;
+  if (value) {
+    loadTilt(value);
+    return;
+  }
+
+  state.tiltDataset = null;
+  updateRealtimeHint();
+  updateControlStates();
+  if (state.stationId) loadStation(state.stationId);
 }
 
 /* --------------------------------------------------------------------------
@@ -2141,6 +2414,8 @@ function updateChartHeader(meta, info) {
     title = info.filename ? `Eigene CSV – ${info.filename}` : "Eigene CSV";
   } else if (source === "demo") {
     title = "Demo – 3 Hz + 8 Hz mit Rauschen";
+  } else if (source === "tilt") {
+    title = `Kipp-Daten · ${meta.dataset || meta.station || "Boje"}`;
   } else {
     title = meta.station ? `Station ${meta.station}` : "Signal";
     if (meta.variable) title += ` · ${meta.variable}`;
@@ -2149,6 +2424,9 @@ function updateChartHeader(meta, info) {
 
   const subtitleParts = [];
   if (meta.station_name) subtitleParts.push(meta.station_name);
+  if (source === "tilt" && meta.deployment) {
+    subtitleParts.push(`Verankerung ${meta.deployment}`);
+  }
   if (meta.description) subtitleParts.push(meta.description);
   if (meta.filter_label) subtitleParts.push(meta.filter_label);
   if (isFiniteNumber(meta.cutoff_hz) && meta.cutoff_hz > 0) {
@@ -2242,6 +2520,7 @@ function updateMetadata(meta, info, data) {
   addRow("Station", stationText);
   addRow("Position", meta.position || "–");
   addRow("Stationstyp", meta.station_type || "–");
+  if (meta.deployment) addRow("Verankerung", meta.deployment);
 
   let variableText = meta.variable || "–";
   if (meta.variable && meta.description) {
@@ -2301,6 +2580,8 @@ function successMessage(meta, info, data) {
     );
   } else if (source === "demo") {
     parts.push("Demo geladen");
+  } else if (source === "tilt") {
+    parts.push(`Kipp-Daten ${meta.dataset || state.tiltDataset} geladen`);
   } else {
     const station = meta.station || state.stationId;
     parts.push(`Station ${station} geladen`);
@@ -2351,11 +2632,16 @@ function applyPayload(payload, info = {}) {
 
 function syncHash() {
   const params = new URLSearchParams();
-  if (state.source === "demo") params.set("demo", "1");
-  if (state.stationId) params.set("station", state.stationId);
-  if (state.variableId) params.set("variable", state.variableId);
+  if (state.tiltDataset) {
+    params.set("tilt", "1");
+    params.set("dataset", state.tiltDataset);
+  } else {
+    if (state.source === "demo") params.set("demo", "1");
+    if (state.stationId) params.set("station", state.stationId);
+    if (state.variableId) params.set("variable", state.variableId);
+  }
 
-  const mode = getTimeMode();
+  const mode = state.tiltDataset ? "realtime" : getTimeMode();
   params.set("mode", mode);
   if (mode === "year") {
     params.set(
@@ -2396,6 +2682,13 @@ function applyHashToForm() {
   }
   const params = new URLSearchParams(raw);
 
+  const tilt = params.get("tilt");
+  const dataset = params.get("dataset");
+  if (tilt === "1" && dataset && /^B\d{4}$/.test(dataset.toUpperCase())) {
+    state.tiltDataset = dataset.toUpperCase();
+    state.startTilt = state.tiltDataset;
+  }
+
   const station = params.get("station");
   if (station && /^[A-Za-z0-9]{3,10}$/.test(station)) {
     state.stationId = station.toUpperCase();
@@ -2414,7 +2707,7 @@ function applyHashToForm() {
 
   const days = params.get("days");
   if (days !== null) {
-    els.daysInput.value = String(clampInt(days, 0, 365, 30));
+    els.daysInput.value = String(clampInt(days, 0, 1000, 30));
   }
   const year = params.get("year");
   if (year !== null) {
@@ -2445,6 +2738,7 @@ function applyHashToForm() {
   if (params.get("demo") === "1") state.startDemo = true;
 
   els.stationInput.value = state.stationId;
+  els.tiltSelect.value = state.tiltDataset || "";
   updateCutoffLabel();
   updateOrderLabel();
   updatePadLabel();
@@ -2481,6 +2775,9 @@ async function loadStation(stationId) {
   const id = stationId.toUpperCase();
   state.stationId = id;
   state.source = "ndbc";
+  state.tiltDataset = null;
+  els.tiltSelect.value = "";
+  updateRealtimeHint();
   removeUploadOption();
   ensureStationOption(
     id,
@@ -2537,6 +2834,11 @@ async function loadStation(stationId) {
 async function loadCurrent() {
   if (state.busy) return;
 
+  if (state.tiltDataset) {
+    await loadTilt(state.tiltDataset);
+    return;
+  }
+
   if (els.stationSelect.value === "__upload__") {
     if (!state.lastUpload) {
       showError("Bitte zuerst eine CSV-Datei auswählen.");
@@ -2586,6 +2888,8 @@ async function loadCurrent() {
 
 async function loadDemo() {
   if (state.busy) return;
+  state.tiltDataset = null;
+  els.tiltSelect.value = "";
   const ctx = beginLoad();
   setBusy(true);
   setStatus("loading", "Lade Demo-Daten …");
@@ -2619,8 +2923,52 @@ async function loadDemo() {
   }
 }
 
+async function loadTilt(datasetId) {
+  if (state.busy) return;
+  const id = String(datasetId || "").toUpperCase();
+  if (!/^B\d{4}$/.test(id)) {
+    showError("Unbekannter Kipp-Datensatz.");
+    return;
+  }
+
+  state.tiltDataset = id;
+  state.source = "tilt";
+  state.variables = [];
+  state.stationInfo = null;
+  els.tiltSelect.value = id;
+  setTimeMode("realtime");
+
+  const ctx = beginLoad();
+  setBusy(true);
+  setStatus("loading", `Lade Kipp-Daten ${id} …`);
+
+  try {
+    const settings = readSettings();
+    const params = buildDataParams(settings, { tilt: id });
+    const payload = await fetchJSON(`/api/data?${params.toString()}`, {
+      signal: ctx.signal,
+    });
+    if (!ctx.isCurrent()) return;
+
+    removeUploadOption();
+    applyPayload(payload, { source: "tilt", dataset: id, settings });
+    updateRealtimeHint();
+    updateControlStates();
+  } catch (error) {
+    if (isAbortError(error) || !ctx.isCurrent()) return;
+    showError(errorMessage(error));
+  } finally {
+    if (ctx.isCurrent()) {
+      if (state.activeAbort === ctx.controller) state.activeAbort = null;
+      setBusy(false);
+    }
+  }
+}
+
 async function uploadText(filename, text, settings) {
   if (state.busy) return;
+  state.tiltDataset = null;
+  els.tiltSelect.value = "";
   const ctx = beginLoad();
   setBusy(true);
   setStatus("loading", `Verarbeite „${filename}“ …`);
@@ -2796,6 +3144,20 @@ function bindDropZone() {
 
 function bindEvents() {
   els.themeToggle.addEventListener("click", toggleTheme);
+  els.browserButton.addEventListener("click", openBrowser);
+  els.browserClose.addEventListener("click", closeBrowser);
+  els.browserSearch.addEventListener("input", renderBrowser);
+  els.browserFilters.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-kind]");
+    if (!button) return;
+    state.browserFilter = button.dataset.kind || "all";
+    syncBrowserFilters();
+    renderBrowser();
+  });
+  els.browserDialog.addEventListener("click", (event) => {
+    if (event.target === els.browserDialog) closeBrowser();
+  });
+  els.tiltSelect.addEventListener("change", handleTiltSelectChange);
   els.cutoffRange.addEventListener("input", updateCutoffLabel);
   els.orderInput.addEventListener("input", updateOrderLabel);
   els.padRange.addEventListener("input", updatePadLabel);
@@ -2861,6 +3223,7 @@ async function init() {
 
   state.chart = createChart(els.chart, els.tooltip);
   bindEvents();
+  loadCatalog({ silent: true });
 
   applyHashToForm();
   updateTimeMode();
@@ -2887,7 +3250,8 @@ async function init() {
     if (state.activeAbort === ctx.controller) state.activeAbort = null;
     setBusy(false);
 
-    if (state.startDemo) await loadDemo();
+    if (state.startTilt) await loadTilt(state.startTilt);
+    else if (state.startDemo) await loadDemo();
     else await loadStation(state.stationId);
   } catch (error) {
     if (isAbortError(error) || !ctx.isCurrent()) return;
@@ -2898,7 +3262,8 @@ async function init() {
     setBusy(false);
     showError(errorMessage(error));
 
-    if (state.startDemo) await loadDemo();
+    if (state.startTilt) await loadTilt(state.startTilt);
+    else if (state.startDemo) await loadDemo();
     else await loadStation(state.stationId);
   }
 }

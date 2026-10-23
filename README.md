@@ -165,6 +165,12 @@ Die Oberfläche bietet:
 
 - 12 kuratierte NDBC-Stationen (oder eine beliebige Stations-ID) und alle
   verfügbaren Messgrößen,
+- einen **Datenbrowser** mit allen aktiven NDBC-Stationen (live aus
+  `activestations.xml`), den Kipp-Datensätzen und weiterführenden öffentlichen
+  Quellen; Suche und Filter nach Stationsart,
+- **Kipp-Daten** (Bojen-Neigung) der GoMOOS/NERACOOS-Bojen B0139, B0137, B0133
+  und B0132 im Golf von Maine: stündliche Neigungswerte in Grad, wahlweise
+  aktuell oder als ganze Verankerung,
 - Echtzeitdaten der letzten Tage oder ein historisches Jahr,
 - Zeiträume werden auf die tatsächlich verfügbaren Daten begrenzt: Die
   Jahresauswahl enthält nur vorhandene Archivjahre ab 2007 (ältere Dateien
@@ -180,10 +186,16 @@ Die Oberfläche bietet:
 - eine Demo sowie den Upload eigener CSV-Dateien per Dateiauswahl oder
   Drag & Drop.
 
+Kipp-Daten lassen sich direkt über das Auswahlfeld **Kipp-Daten (Neigung)** oder
+über den Datenbrowser laden. Der Zeitraum bezieht sich auf das Ende der
+jeweiligen Verankerung; `0` Tage verwendet die gesamte verfügbare Reihe. Große
+Lücken trennen die Messreihe, angezeigt wird der längste zusammenhängende
+Abschnitt.
+
 Der Server lädt die NDBC-Daten bei Bedarf herunter und rechnet die Glättung
-lokal. Ergebnisse werden nicht gespeichert; die Web-Oberfläche ist für die
-explorative Analyse gedacht. Für reproduzierbare Dateien weiterhin die
-Kommandozeile verwenden.
+lokal. Kipp-Daten werden stündlich von GoMOOS/NERACOOS abgerufen. Ergebnisse
+werden nicht gespeichert; die Web-Oberfläche ist für die explorative Analyse
+gedacht. Für reproduzierbare Dateien weiterhin die Kommandozeile verwenden.
 
 ## Wie es funktioniert
 

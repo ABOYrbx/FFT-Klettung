@@ -46,6 +46,10 @@
         <p class="subtitle">Bojendaten auswählen, glätten und interaktiv untersuchen</p>
       </div>
       <div class="header-actions">
+        <button id="browserButton" class="btn btn-secondary header-btn" type="button"
+                aria-haspopup="dialog" aria-controls="browserDialog">
+          Datenbrowser
+        </button>
         <button id="themeToggle" class="theme-toggle" type="button"
                 aria-pressed="false" aria-label="Dunkles Design aktivieren"
                 title="Dunkles Design aktivieren">
@@ -96,6 +100,14 @@
         <select id="variableSelect" disabled>
           <option value="">Erst Station laden …</option>
         </select>
+      </div>
+
+      <div class="field">
+        <label for="tiltSelect">Kipp-Daten (Neigung)</label>
+        <select id="tiltSelect">
+          <option value="">Aus – NDBC-Station verwenden</option>
+        </select>
+        <p class="hint">Stündliche Bojen-Neigung, GoMOOS im Golf von Maine</p>
       </div>
 
       <fieldset class="field fieldset">
@@ -296,9 +308,39 @@
     </section>
   </main>
 
+  <dialog id="browserDialog" class="browser-dialog" aria-labelledby="browserTitle">
+    <div class="browser-head">
+      <div>
+        <h2 id="browserTitle" class="browser-title">Datenbrowser</h2>
+        <p class="browser-subtitle">Öffentliche Bojen- und Messdaten durchsuchen</p>
+      </div>
+      <button id="browserClose" class="browser-close" type="button" aria-label="Datenbrowser schließen">×</button>
+    </div>
+
+    <div class="browser-toolbar">
+      <input id="browserSearch" class="browser-search" type="search"
+             placeholder="Station, Kennung oder Ort suchen …"
+             aria-label="Datenbrowser durchsuchen" autocomplete="off">
+      <div id="browserFilters" class="browser-filters" role="group" aria-label="Einträge filtern">
+        <button type="button" class="chip is-active" data-kind="all" aria-pressed="true">Alle</button>
+        <button type="button" class="chip" data-kind="ndbc" aria-pressed="false">NDBC</button>
+        <button type="button" class="chip" data-kind="tilt" aria-pressed="false">Kipp-Daten</button>
+        <button type="button" class="chip" data-kind="link" aria-pressed="false">Quellen</button>
+      </div>
+      <p id="browserCount" class="browser-count" role="status" aria-live="polite">Wird geladen …</p>
+    </div>
+
+    <div id="browserBody" class="browser-body">
+      <ul id="browserList" class="browser-list"></ul>
+      <p id="browserEmpty" class="browser-empty" hidden>Keine Einträge gefunden.</p>
+    </div>
+
+    <p id="browserNote" class="browser-note"></p>
+  </dialog>
+
   <footer class="site-footer">
     <div class="wrap footer-inner">
-      <p>Datenquelle: <a href="https://www.ndbc.noaa.gov/" target="_blank" rel="noopener">NOAA National Data Buoy Center</a> (öffentliche Daten).</p>
+      <p>Datenquellen: <a href="https://www.ndbc.noaa.gov/" target="_blank" rel="noopener">NOAA NDBC</a> und <a href="https://data.neracoos.org/erddap/" target="_blank" rel="noopener">GoMOOS/NERACOOS</a> (öffentliche Daten).</p>
       <p>Glättung, Filterung und Darstellung erfolgen lokal in dieser Anwendung.</p>
     </div>
   </footer>

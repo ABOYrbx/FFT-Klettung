@@ -44,6 +44,7 @@ des Programms, sondern eine Eigenschaft der Daten.
 | Quelle | Region | Inhalt | Auflösung | Zugang |
 | --- | --- | --- | --- | --- |
 | [NDBC](https://www.ndbc.noaa.gov/) | USA, Pazifik, Atlantik, Große Seen | Wind, Wellen, Luftdruck, Temperaturen | 10 min (ältere Jahre teils 1 h) | frei, txt/gz, kein Login |
+| [GoMOOS/NERACOOS](https://data.neracoos.org/erddap/) | Golf von Maine (USA) | **Bojen-Neigung (Kipp-Daten)**, Strömung, Temperatur | 1 h | frei, CSV, kein Login |
 | [NDBC DODS](https://dods.ndbc.noaa.gov/) | wie oben | dieselben Daten als NetCDF/OPeNDAP | wie oben | frei, ohne Login |
 | [CDIP](https://cdip.ucsd.edu/) | Kalifornien, weltweit | Rohdaten der Bojenbewegung, Wellenspektren | 1–2 Hz bzw. 30–60 min | frei, THREDDS; blockt automatisierte Clients |
 | [Cefas WaveNet](https://wavenet.cefas.co.uk/) | UK, Nordsee, Irische See | Wellenhöhe, -periode, -richtung | 30 min | frei, CSV im Browser |
@@ -118,6 +119,28 @@ Hinweise:
 - Manche Stationen liefern nur stündlich (z. B. ältere Jahre) oder sind
   vorübergehend außer Betrieb. Bei HTTP 404 hilft ein Blick auf die
   [Stationsstatusseite](https://www.ndbc.noaa.gov/wstat.shtml).
+
+## Kipp-Daten (Bojen-Neigung)
+
+Für die Frage, wie sich eine Boje neigt, gibt es bei NDBC kein direktes
+Produkt. Die Web-Oberfläche nutzt stattdessen die Aanderaa-Tilt-Sensoren der
+GoMOOS-Bojen (University of Maine / NERACOOS) im Golf von Maine:
+
+- **Quelle:** `https://gyre.umeoce.maine.edu/data/gomoos/buoy/php/view_csv_file.php`
+  mit dem jeweiligen NetCDF-Pfad als Parameter,
+- **Verankerungen:** B0139 (seit 2024-12-15, laufend), B0137 (2022-09-09 bis
+  2024-01-03), B0133 (2019-06-01 bis 2020-01-23), B0132 (2018-10-01 bis
+  2019-06-01), alle am Western Maine Shelf (etwa 43,18° N, 70,43° W),
+- **Format:** CSV mit `Time[GMT]` und `tilt[degrees](2m)`, stündliche Werte in
+  Grad gegenüber der Vertikalen,
+- **Zugang:** frei, kein Login; die Web-UI ruft die Datei bei Bedarf ab,
+- **Lizenz:** öffentlich, University of Maine / GoMOOS-NERACOOS.
+
+In der Oberfläche stehen die Kipp-Daten im Feld **Kipp-Daten (Neigung)** oder im
+Datenbrowser zur Auswahl. `days=0` lädt die gesamte verfügbare Reihe; große
+Lücken trennen die Abschnitte, standardmäßig wird der längste zusammenhängende
+Abschnitt geglättet. Der Sensor von B0139 liefert erst seit Ende November 2025
+Neigungswerte, davor enthält die Datei nur Strömungs- und Temperaturdaten.
 
 ## CDIP: Rohdaten mit 1–2 Hz
 

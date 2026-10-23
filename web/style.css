@@ -1069,6 +1069,263 @@ input[type="range"]:disabled {
 }
 
 /* ------------------------------------------------------------------ */
+/* Datenbrowser                                                       */
+/* ------------------------------------------------------------------ */
+
+.header-btn {
+  min-height: 38px;
+  padding-inline: 14px;
+}
+
+.browser-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(78vh, 720px);
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--tooltip-shadow);
+  overflow: hidden;
+}
+
+.browser-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.browser-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.browser-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.browser-title {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: -0.01em;
+}
+
+.browser-subtitle {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.browser-close {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.browser-close:hover {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.browser-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 20px 10px;
+}
+
+.browser-search {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.browser-search:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.browser-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 5px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.chip.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.browser-count {
+  margin: 0;
+  color: var(--muted-light);
+  font-size: 0.75rem;
+}
+
+.browser-body {
+  flex: 1 1 auto;
+  min-height: 120px;
+  padding: 4px 12px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.browser-item {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.browser-entry {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.browser-entry:hover,
+.browser-entry:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.browser-entry-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.browser-entry-id {
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.browser-entry-detail {
+  color: var(--muted);
+  font-size: 0.77rem;
+  overflow-wrap: anywhere;
+}
+
+.browser-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.browser-tag {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.browser-tag.is-tilt {
+  border-color: var(--residual);
+  color: var(--residual);
+}
+
+.browser-tag.is-link {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.browser-empty {
+  margin: 28px 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.browser-note {
+  margin: 0;
+  padding: 10px 20px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-light);
+  font-size: 0.73rem;
+}
+
+@media (max-width: 600px) {
+  .browser-dialog {
+    width: calc(100vw - 16px);
+    max-height: 86vh;
+  }
+
+  .browser-head,
+  .browser-toolbar {
+    padding-inline: 14px;
+  }
+
+  .browser-note {
+    padding-inline: 14px;
+  }
+
+  .header-btn {
+    padding-inline: 10px;
+    font-size: 0.8rem;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Fußzeile                                                           */
 /* ------------------------------------------------------------------ */
 
