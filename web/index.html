@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#1769aa">
+  <title>FFT-Glättung – Bojendaten interaktiv</title>
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem("fft-smoothing-theme");
+        var dark = window.matchMedia
+          ? window.matchMedia("(prefers-color-scheme: dark)").matches
+          : false;
+        document.documentElement.dataset.theme =
+          stored === "dark" || stored === "light"
+            ? stored
+            : dark
+              ? "dark"
+              : "light";
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) {
+          meta.setAttribute(
+            "content",
+            document.documentElement.dataset.theme === "dark"
+              ? "#161b22"
+              : "#1769aa"
+          );
+        }
+      } catch (error) {
+        document.documentElement.dataset.theme = "light";
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Zum Inhalt springen</a>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <div class="header-text">
+        <h1>FFT-Glättung</h1>
+        <p class="subtitle">Bojendaten auswählen, glätten und interaktiv untersuchen</p>
+      </div>
+      <div class="header-actions">
+        <button id="themeToggle" class="theme-toggle" type="button"
+                aria-pressed="false" aria-label="Dunkles Design aktivieren"
+                title="Dunkles Design aktivieren">
+          <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" width="18"
+               height="18" aria-hidden="true" focusable="false">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"
+                  fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linejoin="round"></path>
+          </svg>
+          <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" width="18"
+               height="18" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor"
+                    stroke-width="1.8"></circle>
+            <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"
+                  fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="wrap layout">
+    <aside class="controls card" aria-labelledby="controls-title">
+      <h2 id="controls-title" class="card-title">Daten &amp; Filter</h2>
+
+      <div class="field">
+        <label for="stationSelect">Station</label>
+        <select id="stationSelect" aria-describedby="stationHint">
+          <option value="">Stationen werden geladen …</option>
+        </select>
+        <p id="stationHint" class="hint">NDBC-Bojen, nach Region gruppiert</p>
+      </div>
+
+      <div class="field">
+        <label for="stationInput">Stations-ID</label>
+        <div class="input-row">
+          <input id="stationInput" type="text" inputmode="text" autocomplete="off"
+                 spellcheck="false" maxlength="10" placeholder="z. B. 41002"
+                 pattern="[A-Za-z0-9]{3,10}">
+          <button id="stationLoad" type="button" class="btn btn-secondary">Laden</button>
+        </div>
+        <p class="hint">Beliebige NDBC-Kennung, z. B. 46001 oder 41002</p>
+      </div>
+
+      <div class="field">
+        <label for="variableSelect">Messgröße</label>
+        <select id="variableSelect" disabled>
+          <option value="">Erst Station laden …</option>
+        </select>
+      </div>
+
+      <fieldset class="field fieldset">
+        <legend>Zeitraum</legend>
+        <div class="segmented" role="radiogroup" aria-label="Zeitraum-Modus">
+          <label class="segment">
+            <input type="radio" name="timeMode" value="realtime" checked>
+            <span>Aktuell</span>
+          </label>
+          <label class="segment">
+            <input type="radio" name="timeMode" value="year">
+            <span>Jahr</span>
+          </label>
+        </div>
+        <div id="daysField" class="subfield">
+          <label for="daysInput">Tage</label>
+          <div class="input-with-suffix">
+            <input id="daysInput" type="number" min="0" max="365" step="1" value="30"
+                   aria-describedby="daysHint">
+            <span class="suffix">Tage</span>
+          </div>
+          <p id="daysHint" class="hint">0 = alle verfügbaren Daten</p>
+        </div>
+        <div id="yearField" class="subfield" hidden>
+          <label for="yearInput">Jahr</label>
+          <select id="yearInput" aria-describedby="yearHint">
+            <option value="">Wird geladen …</option>
+          </select>
+          <p id="yearHint" class="hint">Nur Jahre mit vorhandenen Daten</p>
+        </div>
+      </fieldset>
+
+      <div class="field">
+        <div class="label-row">
+          <label for="cutoffRange">Grenzfrequenz</label>
+          <output id="cutoffValue" class="value-badge" for="cutoffRange">0,10 × Nyquist</output>
+        </div>
+        <input id="cutoffRange" type="range" min="0.01" max="0.5" step="0.01" value="0.1">
+        <div class="range-scale" aria-hidden="true"><span>0,01</span><span>0,50</span></div>
+        <p class="hint">Anteil der Nyquist-Frequenz; 0,05–0,15 ist ein guter Startwert.</p>
+      </div>
+
+      <div class="field">
+        <label for="filterSelect">Filter</label>
+        <select id="filterSelect">
+          <option value="butterworth" selected>Butterworth</option>
+          <option value="gaussian">Gauß</option>
+          <option value="ideal">Ideal (harte Grenze)</option>
+        </select>
+      </div>
+
+      <div class="field" id="orderField">
+        <div class="label-row">
+          <label for="orderInput">Butterworth-Ordnung</label>
+          <output id="orderValue" class="value-badge" for="orderInput">4</output>
+        </div>
+        <input id="orderInput" type="range" min="1" max="8" step="1" value="4">
+        <div class="range-scale" aria-hidden="true"><span>1</span><span>8</span></div>
+      </div>
+
+      <label class="check">
+        <input id="detrendInput" type="checkbox" checked>
+        <span>Linearen Trend entfernen</span>
+      </label>
+
+      <details class="advanced">
+        <summary>Erweitert</summary>
+        <div class="field">
+          <div class="label-row">
+            <label for="padRange">Spiegel-Padding</label>
+            <output id="padValue" class="value-badge" for="padRange">10 %</output>
+          </div>
+          <input id="padRange" type="range" min="0" max="0.5" step="0.05" value="0.1">
+          <div class="range-scale" aria-hidden="true"><span>0 %</span><span>50 %</span></div>
+          <p class="hint">Reduziert Leckeffekte an den Datenrändern.</p>
+        </div>
+      </details>
+
+      <div class="actions">
+        <button id="loadButton" type="button" class="btn btn-primary">Daten laden &amp; glätten</button>
+        <div class="actions-secondary">
+          <button id="resetZoom" type="button" class="btn btn-secondary" title="Zoom auf den vollen Zeitraum zurücksetzen">Zurücksetzen</button>
+          <button id="demoButton" type="button" class="btn btn-secondary">Demo</button>
+        </div>
+      </div>
+
+      <div class="field upload-field">
+        <span class="label" id="uploadLabel">Eigene CSV</span>
+        <div id="dropZone" class="drop-zone" tabindex="0" role="button"
+             aria-labelledby="uploadLabel" aria-describedby="uploadHint">
+          <input id="fileInput" type="file" accept=".csv,.txt,text/csv,text/plain" hidden>
+          <span class="drop-icon" aria-hidden="true">↑</span>
+          <span class="drop-title">CSV hier ablegen oder <span class="link">Datei wählen</span></span>
+          <span id="uploadHint" class="hint">x = erste Spalte, y = letzte Spalte · max. 10 MB</span>
+          <span id="uploadFilename" class="upload-filename" hidden></span>
+        </div>
+      </div>
+    </aside>
+
+    <section class="results" aria-label="Ergebnisse">
+      <div id="status" class="status" data-kind="info" role="status" aria-live="polite" aria-atomic="true">
+        <span class="status-icon" aria-hidden="true"></span>
+        <span id="statusText">Bereit.</span>
+      </div>
+
+      <section class="card chart-card" aria-labelledby="chartTitle">
+        <div class="chart-head">
+          <div class="chart-heading">
+            <h2 id="chartTitle" class="chart-title">Signal</h2>
+            <p id="chartSubtitle" class="chart-subtitle">Noch keine Daten geladen.</p>
+          </div>
+          <div class="legend" role="group" aria-label="Serien ein- oder ausblenden">
+            <label class="legend-item">
+              <input id="showOriginal" type="checkbox" checked>
+              <span class="swatch swatch-original" aria-hidden="true"></span>
+              <span>Original</span>
+            </label>
+            <label class="legend-item">
+              <input id="showSmoothed" type="checkbox" checked>
+              <span class="swatch swatch-smoothed" aria-hidden="true"></span>
+              <span>Geglättet</span>
+            </label>
+            <label class="legend-item">
+              <input id="showResidual" type="checkbox" checked>
+              <span class="swatch swatch-residual" aria-hidden="true"></span>
+              <span>Rest</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="chartWrap" class="chart-wrap">
+          <canvas id="chart" tabindex="0" role="img"
+                  aria-label="Leeres Diagramm. Bitte Daten laden."
+                  aria-describedby="chartHint"></canvas>
+          <div id="tooltip" class="chart-tooltip" hidden>
+            <div class="tooltip-x" id="tooltipX">–</div>
+            <div class="tooltip-time" id="tooltipTime" hidden></div>
+            <div class="tooltip-grid">
+              <span class="swatch swatch-original" aria-hidden="true"></span>
+              <span>Original</span>
+              <span class="tooltip-value" id="tooltipOriginal">–</span>
+              <span class="swatch swatch-smoothed" aria-hidden="true"></span>
+              <span>Geglättet</span>
+              <span class="tooltip-value" id="tooltipSmoothed">–</span>
+              <span class="swatch swatch-residual" aria-hidden="true"></span>
+              <span>Rest</span>
+              <span class="tooltip-value" id="tooltipResidual">–</span>
+            </div>
+          </div>
+        </div>
+
+        <p id="chartHint" class="chart-hint">
+          Mausrad = zoomen, ziehen = verschieben, Doppelklick = zurücksetzen.
+          Tastatur: Pfeiltasten verschieben, +/− zoomen, Home setzt zurück.
+        </p>
+      </section>
+
+      <section class="stats" aria-label="Kennzahlen">
+        <div class="stat card">
+          <div class="stat-label">RMS Original</div>
+          <div class="stat-value" id="statRmsOriginal">–</div>
+          <div class="stat-unit" id="statRmsOriginalUnit"></div>
+        </div>
+        <div class="stat card">
+          <div class="stat-label">RMS geglättet</div>
+          <div class="stat-value" id="statRmsSmoothed">–</div>
+          <div class="stat-unit" id="statRmsSmoothedUnit"></div>
+        </div>
+        <div class="stat card">
+          <div class="stat-label">Entfernter Anteil</div>
+          <div class="stat-value" id="statRemoved">–</div>
+          <div class="stat-unit">RMS des Rests</div>
+        </div>
+        <div class="stat card">
+          <div class="stat-label">Datenpunkte</div>
+          <div class="stat-value" id="statPoints">–</div>
+          <div class="stat-unit" id="statSkipped"></div>
+        </div>
+        <div class="stat card">
+          <div class="stat-label">Abtastung</div>
+          <div class="stat-value" id="statSampling">–</div>
+          <div class="stat-unit">Median</div>
+        </div>
+        <div class="stat card">
+          <div class="stat-label">Zeitraum</div>
+          <div class="stat-value" id="statDuration">–</div>
+          <div class="stat-unit" id="statDurationDetail"></div>
+        </div>
+      </section>
+
+      <section class="card meta-card" aria-labelledby="metaTitle">
+        <h2 id="metaTitle" class="card-title">Metadaten</h2>
+        <dl id="metadata" class="meta-list">
+          <dt>Hinweis</dt>
+          <dd>Nach dem Laden erscheinen hier Station, Zeitraum und Filtereinstellungen.</dd>
+        </dl>
+      </section>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <p>Datenquelle: <a href="https://www.ndbc.noaa.gov/" target="_blank" rel="noopener">NOAA National Data Buoy Center</a> (öffentliche Daten).</p>
+      <p>Glättung, Filterung und Darstellung erfolgen lokal in dieser Anwendung.</p>
+    </div>
+  </footer>
+</body>
+</html>
